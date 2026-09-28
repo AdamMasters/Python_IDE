@@ -1512,6 +1512,14 @@ function _pyde_decodeSharePayload(decoded) {
   return { code: decoded };
 }
 
+function normaliseVirtualFilename(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed || trimmed === '.' || trimmed === '..' || /[\\/]/.test(trimmed) || trimmed.includes('..')) {
+    return 'input.txt';
+  }
+  return trimmed;
+}
+
 /* ---------- CodeMirror setup ---------- */
 let editorInitialValue = null;
 let autoOpenPuzzle = false;
@@ -1680,7 +1688,7 @@ const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
 });
 if (editorInitialValue !== null) editor.setValue(editorInitialValue);
 if (pendingVfile) {
-  document.getElementById('vfile-name').value = pendingVfile.name || 'input.txt';
+  document.getElementById('vfile-name').value = normaliseVirtualFilename(pendingVfile.name);
   document.getElementById('vfile-content').value = pendingVfile.content || '';
   document.querySelector('details.vfile').open = true;
 } else {
@@ -1689,7 +1697,7 @@ if (pendingVfile) {
   try {
     const savedVfile = JSON.parse(localStorage.getItem('pyde-vfile') || 'null');
     if (savedVfile && (savedVfile.name || savedVfile.content)) {
-      document.getElementById('vfile-name').value = savedVfile.name || 'input.txt';
+      document.getElementById('vfile-name').value = normaliseVirtualFilename(savedVfile.name);
       document.getElementById('vfile-content').value = savedVfile.content || '';
     }
   } catch (e) { /* ignore */ }
@@ -1779,7 +1787,7 @@ function scheduleVfileSave() {
   vfileSaveTimer = setTimeout(() => {
     try {
       localStorage.setItem('pyde-vfile', JSON.stringify({
-        name: document.getElementById('vfile-name').value,
+        name: normaliseVirtualFilename(document.getElementById('vfile-name').value),
         content: document.getElementById('vfile-content').value
       }));
     } catch (e) { /* ignore */ }
@@ -2290,29 +2298,50 @@ function loadP5Library() {
   });
   return p5LoadPromise;
 }
+
+function getPythonGlobal(name) {
+  try {
+    return pyodide.globals.get(name);
+  } catch (e) {
+    return null;
+  }
+}
+
 function createP5Instance(container) {
-  const hasSetup = pyodide.globals.get('setup');
-  const hasDraw = pyodide.globals.get('draw');
   const sketchFn = (sketch) => {
     window._p5Sketch = sketch;
     sketch.setup = () => {
       sketch.createCanvas(400, 400);
-      if (hasSetup) {
-        try { hasSetup(); } catch (e) { appendConsole(String(e.message || e), 'stderr'); }
-      }
+      sketch.noLoop();
     };
-    if (hasDraw) {
-      sketch.draw = () => {
-        try { hasDraw(); } catch (e) { appendConsole(String(e.message || e), 'stderr'); sketch.noLoop(); }
-      };
-    }
   };
   currentP5Instance = new p5(sketchFn, container);
 }
 
+function bindPythonP5Hooks() {
+  const sketch = window._p5Sketch;
+  if (!sketch) return;
+  const hasSetup = getPythonGlobal('setup');
+  const hasDraw = getPythonGlobal('draw');
+  if (hasDraw) {
+    sketch.draw = () => {
+      try { hasDraw(); } catch (e) { appendConsole(String(e.message || e), 'stderr'); sketch.noLoop(); }
+    };
+    sketch.loop();
+  } else {
+    sketch.draw = undefined;
+    sketch.noLoop();
+  }
+  if (hasSetup) {
+    try { hasSetup(); } catch (e) { appendConsole(String(e.message || e), 'stderr'); }
+  }
+}
+
 /* ---------- Virtual input file ---------- */
 function writeVirtualFile() {
-  const filename = document.getElementById('vfile-name').value.trim() || 'input.txt';
+  const filenameInput = document.getElementById('vfile-name');
+  const filename = normaliseVirtualFilename(filenameInput.value);
+  if (filenameInput.value !== filename) filenameInput.value = filename;
   const content = document.getElementById('vfile-content').value;
   try { pyodide.FS.writeFile(filename, content); } catch (e) { /* ignore */ }
 }
@@ -2462,6 +2491,7 @@ async function runCode() {
       p5Container.innerHTML = '';
       if (currentP5Instance) { currentP5Instance.remove(); currentP5Instance = null; }
       await loadP5Library();
+      createP5Instance(p5Container);
     } else {
       switchTab('console');
     }
@@ -2476,7 +2506,7 @@ async function runCode() {
       }
       if (!handledInline) {
         await pyodide.runPythonAsync(code);
-        if (isP5) createP5Instance(p5Container);
+        if (isP5) bindPythonP5Hooks();
       }
     } catch (err) {
       appendConsole(String(err.message || err), 'stderr');
@@ -2557,7 +2587,7 @@ document.getElementById('new-btn').addEventListener('click', () => {
 function _pyde_buildSharePayload(code) {
   const vfileContent = document.getElementById('vfile-content').value;
   if (!vfileContent) return code;
-  const vfileName = document.getElementById('vfile-name').value.trim() || 'input.txt';
+  const vfileName = normaliseVirtualFilename(document.getElementById('vfile-name').value);
   return JSON.stringify({ code, vfileName, vfileContent });
 }
 
