@@ -2321,6 +2321,16 @@ function createP5Instance(container) {
   currentP5Instance = new p5(sketchFn, container);
 }
 
+function cleanupP5Instance() {
+  if (currentP5Instance) {
+    currentP5Instance.remove();
+    currentP5Instance = null;
+  }
+  window._p5Sketch = null;
+  const p5Container = document.getElementById('p5-container');
+  if (p5Container) p5Container.innerHTML = '';
+}
+
 function bindPythonP5Hooks() {
   const sketch = window._p5Sketch;
   if (!sketch) return;
@@ -2350,6 +2360,13 @@ function writeVirtualFile() {
 }
 
 /* ---------- Captured output files ---------- */
+let currentFileUrls = [];
+function clearFileList() {
+  currentFileUrls.forEach((url) => URL.revokeObjectURL(url));
+  currentFileUrls = [];
+  document.getElementById('files-list').innerHTML = '';
+}
+
 function snapshotFS() {
   const snap = {};
   try {
@@ -2375,7 +2392,7 @@ function diffAndListFiles(before) {
   }
   const list = document.getElementById('files-list');
   const empty = document.getElementById('files-empty');
-  list.innerHTML = '';
+  clearFileList();
   if (changed.length === 0) {
     empty.classList.remove('hidden');
     return;
@@ -2386,6 +2403,7 @@ function diffAndListFiles(before) {
     try { data = pyodide.FS.readFile(name); } catch (e) { return; }
     const blob = new Blob([data]);
     const url = URL.createObjectURL(blob);
+    currentFileUrls.push(url);
 
     const li = document.createElement('li');
     li.className = 'file-entry';
@@ -2493,7 +2511,7 @@ async function runCode() {
       turtleCanvas.style.display = 'none';
       p5Container.style.display = 'block';
       p5Container.innerHTML = '';
-      if (currentP5Instance) { currentP5Instance.remove(); currentP5Instance = null; }
+      cleanupP5Instance();
       await loadP5Library();
       createP5Instance(p5Container);
     } else {
@@ -2516,6 +2534,7 @@ async function runCode() {
         if (isP5) bindPythonP5Hooks();
       }
     } catch (err) {
+      if (isP5) cleanupP5Instance();
       appendConsole(String(err.message || err), 'stderr');
       switchTab('console');
     }
@@ -2565,16 +2584,15 @@ document.getElementById('upload-input').addEventListener('change', (e) => {
    doesn't look like how you'd tidy up code you meant to keep. */
 document.getElementById('new-btn').addEventListener('click', () => {
   if (!confirm('Start a new, blank program? This replaces the current code and input file.')) return;
-  if (currentP5Instance) { currentP5Instance.remove(); currentP5Instance = null; }
+  cleanupP5Instance();
   editor.setValue('');
   document.getElementById('filename-input').value = 'program.py';
   document.getElementById('vfile-name').value = 'input.txt';
   document.getElementById('vfile-content').value = '';
   document.getElementById('turtle-canvas').style.display = 'none';
   document.getElementById('p5-container').style.display = 'none';
-  document.getElementById('p5-container').innerHTML = '';
   clearConsole();
-  document.getElementById('files-list').innerHTML = '';
+  clearFileList();
   document.getElementById('files-empty').classList.remove('hidden');
   switchTab('console');
   try {
