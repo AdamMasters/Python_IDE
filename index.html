@@ -2187,6 +2187,52 @@ def _pyde_make_input_generator(source):
     return ns['__pyde_main']()
 `;
 
+const PYDE_EXECUTION_HELPERS_SRC = `
+import ast
+import json
+
+def _pyde_detect_mode(source):
+    try:
+        tree = ast.parse(source, mode='exec')
+    except SyntaxError:
+        return json.dumps({'is_turtle': False, 'is_p5': False})
+
+    is_turtle = False
+    is_p5 = False
+    has_draw = False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split('.', 1)[0]
+                if top == 'turtle':
+                    is_turtle = True
+                elif top == 'p5':
+                    is_p5 = True
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            top = node.module.split('.', 1)[0]
+            if top == 'turtle':
+                is_turtle = True
+            elif top == 'p5':
+                is_p5 = True
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == 'draw':
+            has_draw = True
+
+    if has_draw and not is_turtle:
+        is_p5 = True
+
+    return json.dumps({'is_turtle': is_turtle, 'is_p5': (not is_turtle) and is_p5})
+
+def _pyde_exec_p5(source):
+    ns = {'__name__': '__main__'}
+    exec(source, ns)
+    globals()['_pyde_p5_ns'] = ns
+
+def _pyde_get_p5_global(name):
+    ns = globals().get('_pyde_p5_ns') or {}
+    return ns.get(name)
+`;
+
 /* Shows an inline, in-console text box for one input() request and resolves
    with what the student typed once they press Enter. Unlike window.prompt(),
    this keeps the whole console scrollback visible the whole time. */
@@ -2237,7 +2283,13 @@ async function tryRunWithInlineInput(code) {
   if (!gen) return false;
   let sendValue;
   while (true) {
-    const result = gen.next(sendValue);
+    let result;
+    try {
+      result = gen.next(sendValue);
+    } catch (e) {
+      appendConsole(String(e.message || e), 'stderr');
+      return true;
+    }
     if (result.done) break;
     sendValue = await requestInlineInput(String(result.value));
   }
@@ -2258,6 +2310,7 @@ async function initPyodide() {
   await pyodide.runPythonAsync(P5_MODULE_SRC);
   await pyodide.runPythonAsync(INPUT_OVERRIDE_SRC);
   await pyodide.runPythonAsync(INPUT_GENERATOR_SRC);
+  await pyodide.runPythonAsync(PYDE_EXECUTION_HELPERS_SRC);
   pyodideReady = true;
   document.getElementById('status-dot').classList.add('ready');
   document.getElementById('status-text').textContent = 'Ready';
@@ -2304,7 +2357,7 @@ function loadP5Library() {
 
 function getPythonGlobal(name) {
   try {
-    return pyodide.globals.get(name);
+    return pyodide.globals.get('_pyde_get_p5_global')(name);
   } catch (e) {
     return null;
   }
@@ -2313,8 +2366,12 @@ function getPythonGlobal(name) {
 function createP5Instance(container) {
   const sketchFn = (sketch) => {
     window._p5Sketch = sketch;
+    const originalCreateCanvas = sketch.createCanvas.bind(sketch);
+    sketch.createCanvas = (...args) => {
+      sketch._pydeCanvasCreated = true;
+      return originalCreateCanvas(...args);
+    };
     sketch.setup = () => {
-      sketch.createCanvas(400, 400);
       sketch.noLoop();
     };
   };
@@ -2336,6 +2393,12 @@ function bindPythonP5Hooks() {
   if (!sketch) return;
   const hasSetup = getPythonGlobal('setup');
   const hasDraw = getPythonGlobal('draw');
+  if (hasSetup) {
+    try { hasSetup(); } catch (e) { appendConsole(String(e.message || e), 'stderr'); }
+  }
+  if (!sketch._pydeCanvasCreated && hasDraw) {
+    sketch.createCanvas(400, 400);
+  }
   if (hasDraw) {
     sketch.draw = () => {
       try { hasDraw(); } catch (e) { appendConsole(String(e.message || e), 'stderr'); sketch.noLoop(); }
@@ -2344,9 +2407,6 @@ function bindPythonP5Hooks() {
   } else {
     sketch.draw = undefined;
     sketch.noLoop();
-  }
-  if (hasSetup) {
-    try { hasSetup(); } catch (e) { appendConsole(String(e.message || e), 'stderr'); }
   }
 }
 
@@ -2511,8 +2571,9 @@ async function runCode() {
   clearConsole();
 
   const code = editor.getValue();
-  const isTurtle = /\bimport\s+turtle\b|\bfrom\s+turtle\s+import\b/.test(code);
-  const isP5 = !isTurtle && (/\bimport\s+p5\b|\bfrom\s+p5\s+import\b/.test(code) || /def\s+draw\s*\(\s*\)\s*:/.test(code));
+  const modeInfo = JSON.parse(pyodide.globals.get('_pyde_detect_mode')(code));
+  const isTurtle = !!modeInfo.is_turtle;
+  const isP5 = !!modeInfo.is_p5;
 
   const turtleCanvas = document.getElementById('turtle-canvas');
   const p5Container = document.getElementById('p5-container');
@@ -2547,16 +2608,17 @@ async function runCode() {
     }
 
     try {
-      if (isP5) {
-        await pyodide.runPythonAsync("globals().pop('setup', None)\nglobals().pop('draw', None)");
-      }
       let handledInline = false;
       if (!isTurtle && !isP5) {
         handledInline = await tryRunWithInlineInput(code);
       }
       if (!handledInline) {
-        await pyodide.runPythonAsync(code);
-        if (isP5) bindPythonP5Hooks();
+        if (isP5) {
+          await pyodide.globals.get('_pyde_exec_p5')(code);
+          bindPythonP5Hooks();
+        } else {
+          await pyodide.runPythonAsync(code);
+        }
       }
     } catch (err) {
       if (isP5) cleanupP5Instance();
@@ -2645,7 +2707,7 @@ document.getElementById('share-btn').addEventListener('click', () => {
   const code = editor.getValue();
   const compressed = LZString.compressToEncodedURIComponent(_pyde_buildSharePayload(code));
   const url = location.origin + location.pathname + '#code=' + compressed;
-  history.replaceState(null, '', '#code=' + compressed);
+  history.replaceState(null, '', url);
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url)
       .then(() => showToast('Share link copied to clipboard!'))
@@ -2782,7 +2844,7 @@ document.getElementById('parsons-copy').addEventListener('click', () => {
 document.getElementById('parsons-share').addEventListener('click', () => {
   const compressed = LZString.compressToEncodedURIComponent(_pyde_buildSharePayload(parsonsOriginal.join('\n')));
   const url = location.origin + location.pathname + '#puzzle=' + compressed;
-  history.replaceState(null, '', '#puzzle=' + compressed);
+  history.replaceState(null, '', url);
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url)
       .then(() => showToast('Puzzle link copied to clipboard!'))
