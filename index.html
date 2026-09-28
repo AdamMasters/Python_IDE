@@ -2292,6 +2292,9 @@ function loadP5Library() {
   p5LoadPromise = new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js';
+    s.integrity = 'sha512-d6sc8kbZEtA2LwB9m/ck0FhvyUwVfdmvTeyJRprmj7Wg9wRFtHDIpr6qk4g/y3Ix3O9I6KHIv6SGu9f7RaP1Gw==';
+    s.crossOrigin = 'anonymous';
+    s.referrerPolicy = 'no-referrer';
     s.onload = resolve;
     s.onerror = reject;
     document.head.appendChild(s);
@@ -2356,7 +2359,8 @@ function snapshotFS() {
       try {
         const stat = pyodide.FS.stat(name);
         if (pyodide.FS.isFile(stat.mode)) {
-          snap[name] = stat.mtime instanceof Date ? stat.mtime.getTime() : String(stat.mtime);
+          const mtime = stat.mtime instanceof Date ? stat.mtime.getTime() : String(stat.mtime);
+          snap[name] = String(stat.size) + '|' + mtime;
         }
       } catch (e) { /* ignore */ }
     }
@@ -2500,6 +2504,9 @@ async function runCode() {
     const before = snapshotFS();
 
     try {
+      if (isP5) {
+        await pyodide.runPythonAsync("globals().pop('setup', None)\nglobals().pop('draw', None)");
+      }
       let handledInline = false;
       if (!isTurtle && !isP5) {
         handledInline = await tryRunWithInlineInput(code);
