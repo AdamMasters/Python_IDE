@@ -1531,7 +1531,7 @@ if (location.hash.startsWith('#code=')) {
     if (decoded) {
       const parsed = _pyde_decodeSharePayload(decoded);
       editorInitialValue = parsed.code;
-      if (parsed.vfileContent !== undefined) pendingVfile = { name: parsed.vfileName, content: parsed.vfileContent };
+      if (parsed.vfileContent !== undefined) pendingVfile = { name: normaliseVirtualFilename(parsed.vfileName), content: parsed.vfileContent };
     }
   } catch (e) { /* ignore malformed hash */ }
 } else if (location.hash.startsWith('#puzzle=')) {
@@ -1545,7 +1545,7 @@ if (location.hash.startsWith('#code=')) {
       pendingPuzzleCode = parsed.code;
       autoOpenPuzzle = true;
       editorInitialValue = '# Solve the puzzle to reveal the code!\n# (click "Parsons" above if it does not open automatically)';
-      if (parsed.vfileContent !== undefined) pendingVfile = { name: parsed.vfileName, content: parsed.vfileContent };
+      if (parsed.vfileContent !== undefined) pendingVfile = { name: normaliseVirtualFilename(parsed.vfileName), content: parsed.vfileContent };
     }
   } catch (e) { /* ignore malformed hash */ }
 }
@@ -2387,13 +2387,17 @@ function snapshotFS() {
 function diffAndListFiles(before) {
   const after = snapshotFS();
   const changed = [];
+  const removed = [];
   for (const name in after) {
     if (!(name in before) || before[name] !== after[name]) changed.push(name);
+  }
+  for (const name in before) {
+    if (!(name in after)) removed.push(name);
   }
   const list = document.getElementById('files-list');
   const empty = document.getElementById('files-empty');
   clearFileList();
-  if (changed.length === 0) {
+  if (changed.length === 0 && removed.length === 0) {
     empty.classList.remove('hidden');
     return;
   }
@@ -2440,6 +2444,22 @@ function diffAndListFiles(before) {
       li.appendChild(note);
     }
 
+    list.appendChild(li);
+  });
+  removed.forEach(name => {
+    const li = document.createElement('li');
+    li.className = 'file-entry';
+    const header = document.createElement('div');
+    header.className = 'file-entry-header';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'file-entry-name';
+    nameSpan.textContent = name;
+    header.appendChild(nameSpan);
+    li.appendChild(header);
+    const note = document.createElement('p');
+    note.className = 'file-entry-binary-note';
+    note.textContent = 'Removed by program during this run.';
+    li.appendChild(note);
     list.appendChild(li);
   });
 }
