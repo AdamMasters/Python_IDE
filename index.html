@@ -974,6 +974,7 @@
       <p>Everything here runs entirely in <strong>your own browser</strong> — Python is executed locally via WebAssembly, and nothing you write or run is ever uploaded to or executed on a server.</p>
       <p>Share links work the same way: the code is packed into the link itself (after the <code>#</code>), which browsers never send to the server. So a shared link doesn't put anything on our infrastructure — but it does mean a link can carry <em>any</em> program. Please don't run code from a shared link you don't trust: while your tab is open, that code can still change what's on this page.</p>
       <p>Because Python runs on this same tab, a program with an infinite loop (or a very long <code>time.sleep</code>) will freeze the page completely — there's currently no way to stop it from here. If that happens, reload the tab to recover.</p>
+      <p>Source, licence, and build details: <a href="https://github.com/AdamMasters/Python_IDE" target="_blank" rel="noopener">github.com/AdamMasters/Python_IDE</a>.</p>
       <button id="about-close">Got it</button>
     </div>
   </div>
@@ -1088,143 +1089,1645 @@ print("Hello, world!")
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
   <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
 
-  <script>
-    const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
-    const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
-      mode: 'python',
-      theme: 'sketch',
-      lineNumbers: true,
-      matchBrackets: true,
-      autoCloseBrackets: true,
-      inputStyle: ('ontouchstart' in window) || navigator.maxTouchPoints > 0 ? 'contenteditable' : 'textarea',
-      indentUnit: 4,
-      tabSize: 4,
-      extraKeys: {
-        Tab: function(cm) { if (cm.somethingSelected()) { cm.execCommand('indentMore'); } else { cm.replaceSelection('    '); } },
-        'Shift-Tab': 'indentLess',
-        Backspace: function(cm) {
-          if (cm.somethingSelected()) return CodeMirror.Pass;
-          const cur = cm.getCursor();
-          const beforeCursor = cm.getLine(cur.line).slice(0, cur.ch);
-          if (!/^\s+$/.test(beforeCursor)) return CodeMirror.Pass;
-          const tabSize = cm.getOption('indentUnit') || 4;
-          const deleteCount = cur.ch % tabSize === 0 ? tabSize : cur.ch % tabSize;
-          cm.replaceRange('', { line: cur.line, ch: cur.ch - deleteCount }, cur);
-        },
-        "'#'": function(cm) {
-          if (!cm.somethingSelected()) return CodeMirror.Pass;
-          const lineSet = new Set();
-          cm.listSelections().forEach(sel => {
-            const fromLine = Math.min(sel.anchor.line, sel.head.line);
-            const toLine = Math.max(sel.anchor.line, sel.head.line);
-            for (let l = fromLine; l <= toLine; l++) lineSet.add(l);
-          });
-          const lines = [...lineSet].sort((a, b) => a - b);
-          const codeLines = lines.filter(l => cm.getLine(l).trim() !== '');
-          const shouldUncomment = codeLines.length > 0 && codeLines.every(l => /^\s*#/.test(cm.getLine(l)));
-          cm.operation(() => {
-            lines.forEach(l => {
-              const text = cm.getLine(l);
-              if (text.trim() === '') return;
-              if (shouldUncomment) {
-                const m = text.match(/^(\s*)#\s?/);
-                if (m) cm.replaceRange('', { line: l, ch: m[1].length }, { line: l, ch: m[0].length });
-              } else {
-                const indent = text.match(/^\s*/)[0].length;
-                cm.replaceRange('# ', { line: l, ch: indent }, { line: l, ch: indent });
-              }
-            });
-          });
-        },
-        'Cmd-D': function(cm) {
-          const selections = cm.listSelections();
-          const last = selections[selections.length - 1];
-          if (CodeMirror.cmpPos(last.anchor, last.head) === 0) {
-            const cur = last.head;
-            const line = cm.getLine(cur.line);
-            let start = cur.ch, end = cur.ch;
-            while (start > 0 && /\w/.test(line.charAt(start - 1))) start--;
-            while (end < line.length && /\w/.test(line.charAt(end))) end++;
-            if (start === end) return;
-            const from = { line: cur.line, ch: start };
-            const to = { line: cur.line, ch: end };
-            const newSelections = selections.slice(0, -1).concat([{ anchor: from, head: to }]);
-            cm.setSelections(newSelections, newSelections.length - 1);
-            return;
-          }
-          const word = cm.getRange(last.anchor, last.head);
-          if (!word) return;
-          const searchFrom = CodeMirror.cmpPos(last.anchor, last.head) < 0 ? last.head : last.anchor;
-          const isDuplicate = (from, to) => selections.some(s =>
-            (CodeMirror.cmpPos(s.anchor, from) === 0 && CodeMirror.cmpPos(s.head, to) === 0) ||
-            (CodeMirror.cmpPos(s.anchor, to) === 0 && CodeMirror.cmpPos(s.head, from) === 0)
-          );
-          let cursor = cm.getSearchCursor(word, searchFrom);
-          let from = null, to = null;
-          for (let i = 0; i < selections.length + 1; i++) {
-            if (!cursor.findNext()) {
-              cursor = cm.getSearchCursor(word, { line: 0, ch: 0 });
-              if (!cursor.findNext()) return;
-            }
-            from = cursor.from();
-            to = cursor.to();
-            if (!isDuplicate(from, to)) break;
-          }
-          if (!from) return;
-          const newSelections = selections.concat([{ anchor: from, head: to }]);
-          cm.setSelections(newSelections, newSelections.length - 1);
-          cm.scrollIntoView({ from, to });
-        },
-        'Ctrl-D': function(cm) {
-          const selections = cm.listSelections();
-          const last = selections[selections.length - 1];
-          if (CodeMirror.cmpPos(last.anchor, last.head) === 0) {
-            const cur = last.head;
-            const line = cm.getLine(cur.line);
-            let start = cur.ch, end = cur.ch;
-            while (start > 0 && /\w/.test(line.charAt(start - 1))) start--;
-            while (end < line.length && /\w/.test(line.charAt(end))) end++;
-            if (start === end) return;
-            const from = { line: cur.line, ch: start };
-            const to = { line: cur.line, ch: end };
-            const newSelections = selections.slice(0, -1).concat([{ anchor: from, head: to }]);
-            cm.setSelections(newSelections, newSelections.length - 1);
-            return;
-          }
-          const word = cm.getRange(last.anchor, last.head);
-          if (!word) return;
-          const searchFrom = CodeMirror.cmpPos(last.anchor, last.head) < 0 ? last.head : last.anchor;
-          const isDuplicate = (from, to) => selections.some(s =>
-            (CodeMirror.cmpPos(s.anchor, from) === 0 && CodeMirror.cmpPos(s.head, to) === 0) ||
-            (CodeMirror.cmpPos(s.anchor, to) === 0 && CodeMirror.cmpPos(s.head, from) === 0)
-          );
-          let cursor = cm.getSearchCursor(word, searchFrom);
-          let from = null, to = null;
-          for (let i = 0; i < selections.length + 1; i++) {
-            if (!cursor.findNext()) {
-              cursor = cm.getSearchCursor(word, { line: 0, ch: 0 });
-              if (!cursor.findNext()) return;
-            }
-            from = cursor.from();
-            to = cursor.to();
-            if (!isDuplicate(from, to)) break;
-          }
-          if (!from) return;
-          const newSelections = selections.concat([{ anchor: from, head: to }]);
-          cm.setSelections(newSelections, newSelections.length - 1);
-          cm.scrollIntoView({ from, to });
-        }
+<script>
+/* ---------- Python shim source: canvas-backed turtle module ---------- */
+const TURTLE_SRC = `
+import math
+from js import _turtleCanvas as _turtle_canvas, _turtleCtx as _turtle_ctx
+
+def _parse_color(args):
+    if len(args) == 1:
+        c = args[0]
+        if isinstance(c, (tuple, list)) and len(c) == 3:
+            r, g, b = c
+            return "rgb(%d,%d,%d)" % (int(r), int(g), int(b))
+        return str(c)
+    if len(args) == 3:
+        r, g, b = args
+        return "rgb(%d,%d,%d)" % (int(r), int(g), int(b))
+    return "#000000"
+
+def _tx(x, y):
+    return _turtle_canvas.width / 2 + x, _turtle_canvas.height / 2 - y
+
+class Turtle:
+    def __init__(self):
+        self._x = 0.0
+        self._y = 0.0
+        self._heading = 0.0
+        self._is_down = True
+        self._pen_color = "#000000"
+        self._fill_color = "#000000"
+        self._pen_size = 1
+        self._visible = True
+        self._filling = False
+        self._fill_points = []
+
+    def _move_to(self, nx, ny):
+        if self._is_down:
+            x1, y1 = _tx(self._x, self._y)
+            x2, y2 = _tx(nx, ny)
+            _turtle_ctx.beginPath()
+            _turtle_ctx.strokeStyle = self._pen_color
+            _turtle_ctx.lineWidth = self._pen_size
+            _turtle_ctx.moveTo(x1, y1)
+            _turtle_ctx.lineTo(x2, y2)
+            _turtle_ctx.stroke()
+        if self._filling:
+            self._fill_points.append((nx, ny))
+        self._x, self._y = nx, ny
+
+    def forward(self, dist):
+        rad = math.radians(self._heading)
+        self._move_to(self._x + dist * math.cos(rad), self._y + dist * math.sin(rad))
+    fd = forward
+
+    def backward(self, dist):
+        self.forward(-dist)
+    bk = backward
+    back = backward
+
+    def right(self, angle):
+        self._heading -= angle
+    rt = right
+
+    def left(self, angle):
+        self._heading += angle
+    lt = left
+
+    def setheading(self, angle):
+        self._heading = angle
+    seth = setheading
+
+    def heading(self):
+        return self._heading
+
+    def home(self):
+        self._move_to(0, 0)
+        self._heading = 0
+
+    def goto(self, x, y=None):
+        if y is None:
+            x, y = x[0], x[1]
+        self._move_to(x, y)
+    setpos = goto
+    setposition = goto
+
+    def setx(self, x):
+        self._move_to(x, self._y)
+
+    def sety(self, y):
+        self._move_to(self._x, y)
+
+    def position(self):
+        return (self._x, self._y)
+    pos = position
+
+    def xcor(self):
+        return self._x
+
+    def ycor(self):
+        return self._y
+
+    def distance(self, x, y=None):
+        if y is None:
+            x, y = x[0], x[1]
+        return math.hypot(x - self._x, y - self._y)
+
+    def penup(self):
+        self._is_down = False
+    pu = penup
+    up = penup
+
+    def pendown(self):
+        self._is_down = True
+    pd = pendown
+    down = pendown
+
+    def isdown(self):
+        return self._is_down
+
+    def pensize(self, w=None):
+        if w is None:
+            return self._pen_size
+        self._pen_size = w
+    width = pensize
+
+    def pencolor(self, *args):
+        if not args:
+            return self._pen_color
+        self._pen_color = _parse_color(args)
+
+    def fillcolor(self, *args):
+        if not args:
+            return self._fill_color
+        self._fill_color = _parse_color(args)
+
+    def color(self, *args):
+        if not args:
+            return (self._pen_color, self._fill_color)
+        if len(args) == 2:
+            self._pen_color = _parse_color([args[0]])
+            self._fill_color = _parse_color([args[1]])
+        else:
+            c = _parse_color(args)
+            self._pen_color = c
+            self._fill_color = c
+
+    def begin_fill(self):
+        self._filling = True
+        self._fill_points = [(self._x, self._y)]
+
+    def end_fill(self):
+        self._filling = False
+        pts = self._fill_points
+        if len(pts) > 2:
+            _turtle_ctx.beginPath()
+            _turtle_ctx.fillStyle = self._fill_color
+            x0, y0 = _tx(*pts[0])
+            _turtle_ctx.moveTo(x0, y0)
+            for p in pts[1:]:
+                px, py = _tx(*p)
+                _turtle_ctx.lineTo(px, py)
+            _turtle_ctx.closePath()
+            _turtle_ctx.fill()
+        self._fill_points = []
+
+    def circle(self, radius, extent=360, steps=None):
+        if steps is None:
+            steps = max(12, int(abs(extent) / 6))
+        angle = extent / steps
+        chord = 2 * abs(radius) * math.sin(math.radians(angle) / 2)
+        turn = angle if radius >= 0 else -angle
+        for _ in range(steps):
+            self.forward(chord)
+            self.left(turn)
+
+    def dot(self, size=None, color=None):
+        if size is None:
+            size = max(self._pen_size + 4, 8)
+        col = _parse_color([color]) if color is not None else self._pen_color
+        cx, cy = _tx(self._x, self._y)
+        _turtle_ctx.beginPath()
+        _turtle_ctx.fillStyle = col
+        _turtle_ctx.arc(cx, cy, size / 2, 0, 2 * math.pi)
+        _turtle_ctx.fill()
+
+    def write(self, text, move=False, align="left", font=None):
+        cx, cy = _tx(self._x, self._y)
+        _turtle_ctx.fillStyle = self._pen_color
+        _turtle_ctx.font = "14px monospace"
+        _turtle_ctx.textAlign = align if align in ("left", "center", "right") else "left"
+        _turtle_ctx.fillText(str(text), cx, cy)
+
+    def showturtle(self):
+        self._visible = True
+    st = showturtle
+
+    def hideturtle(self):
+        self._visible = False
+    ht = hideturtle
+
+    def isvisible(self):
+        return self._visible
+
+    def speed(self, s=None):
+        pass
+
+    def reset(self):
+        self._x = self._y = 0.0
+        self._heading = 0.0
+        self._is_down = True
+
+    def clear(self):
+        _turtle_ctx.clearRect(0, 0, _turtle_canvas.width, _turtle_canvas.height)
+        _turtle_ctx.fillStyle = "#ffffff"
+        _turtle_ctx.fillRect(0, 0, _turtle_canvas.width, _turtle_canvas.height)
+
+Pen = Turtle
+
+class _Screen:
+    def bgcolor(self, *args):
+        if not args:
+            return "#ffffff"
+        col = _parse_color(args)
+        _turtle_ctx.fillStyle = col
+        _turtle_ctx.fillRect(0, 0, _turtle_canvas.width, _turtle_canvas.height)
+
+    def title(self, t):
+        pass
+
+    def setup(self, *a, **k):
+        pass
+
+    def screensize(self, *a, **k):
+        pass
+
+    def mainloop(self):
+        pass
+
+    def exitonclick(self):
+        pass
+
+    def tracer(self, *a, **k):
+        pass
+
+    def update(self):
+        pass
+
+    def clear(self):
+        _turtle_ctx.clearRect(0, 0, _turtle_canvas.width, _turtle_canvas.height)
+        _turtle_ctx.fillStyle = "#ffffff"
+        _turtle_ctx.fillRect(0, 0, _turtle_canvas.width, _turtle_canvas.height)
+
+_screen = _Screen()
+
+def Screen():
+    return _screen
+
+_default = Turtle()
+
+def forward(d): _default.forward(d)
+def fd(d): _default.forward(d)
+def backward(d): _default.backward(d)
+def bk(d): _default.backward(d)
+def back(d): _default.backward(d)
+def right(a): _default.right(a)
+def rt(a): _default.right(a)
+def left(a): _default.left(a)
+def lt(a): _default.left(a)
+def setheading(a): _default.setheading(a)
+def seth(a): _default.setheading(a)
+def heading(): return _default.heading()
+def home(): _default.home()
+def goto(x, y=None): _default.goto(x, y)
+def setpos(x, y=None): _default.goto(x, y)
+def setposition(x, y=None): _default.goto(x, y)
+def setx(x): _default.setx(x)
+def sety(y): _default.sety(y)
+def position(): return _default.position()
+def pos(): return _default.position()
+def xcor(): return _default.xcor()
+def ycor(): return _default.ycor()
+def distance(x, y=None): return _default.distance(x, y)
+def penup(): _default.penup()
+def pu(): _default.penup()
+def up(): _default.penup()
+def pendown(): _default.pendown()
+def pd(): _default.pendown()
+def down(): _default.pendown()
+def isdown(): return _default.isdown()
+def pensize(w=None): return _default.pensize(w)
+def width(w=None): return _default.pensize(w)
+def pencolor(*a): return _default.pencolor(*a)
+def fillcolor(*a): return _default.fillcolor(*a)
+def color(*a): return _default.color(*a)
+def begin_fill(): _default.begin_fill()
+def end_fill(): _default.end_fill()
+def circle(r, extent=360, steps=None): _default.circle(r, extent, steps)
+def dot(size=None, color=None): _default.dot(size, color)
+def write(text, move=False, align="left", font=None): _default.write(text, move, align, font)
+def showturtle(): _default.showturtle()
+def st(): _default.showturtle()
+def hideturtle(): _default.hideturtle()
+def ht(): _default.hideturtle()
+def isvisible(): return _default.isvisible()
+def speed(s=None): pass
+def reset(): _default.reset()
+def clear(): _default.clear()
+def bgcolor(*a): return _screen.bgcolor(*a)
+def title(t): pass
+def setup(*a, **k): pass
+def screensize(*a, **k): pass
+def mainloop(): pass
+def done(): pass
+def exitonclick(): pass
+def tracer(*a, **k): pass
+def update(): pass
+`;
+
+/* p5 module. `import p5; p5.whatever(...)` forwards any attribute lazily to
+   the live JS p5 instance via __getattr__, covering the full p5.js API.
+   That alone doesn't help `from p5 import *` though — Python's star-import
+   only copies names that actually exist in the module's namespace, it never
+   calls __getattr__ - so a curated set of real wrapper functions is defined
+   too, covering the common drawing/canvas/colour API plus the snake_case
+   names (no_fill, no_stroke, size for createCanvas, ...) that the actual
+   "p5"/Processing-style Python convention uses, since that's what code
+   written against `from p5 import *` tends to assume. Anything whose name
+   would shadow a Python builtin (map, min, max, print, pow, ...) is left out
+   of that curated set on purpose - it stays reachable via `p5.min(...)` etc.
+   Live-valued properties (width, mouseX, frameCount, PI, ...) aren't in the
+   curated set either: `from p5 import *` captures a value once, at import
+   time, before the sketch even exists, so there's no way to make those
+   "live" that way - use `import p5; p5.width` for those instead. */
+const P5_MODULE_SRC = `
+import sys, types
+import js as _js
+
+def _pyde_p5_method(js_name):
+    def wrapper(*args, **kwargs):
+        sketch = getattr(_js, "_p5Sketch", None)
+        if sketch is None:
+            raise RuntimeError("p5 sketch is not ready yet")
+        return getattr(sketch, js_name)(*args, **kwargs)
+    wrapper.__name__ = js_name
+    return wrapper
+
+_PYDE_P5_FUNCS = [
+    ("createCanvas", "createCanvas"), ("create_canvas", "createCanvas"), ("size", "createCanvas"),
+    ("resizeCanvas", "resizeCanvas"), ("resize_canvas", "resizeCanvas"),
+    ("background", "background"),
+    ("clear", "clear"),
+    ("noLoop", "noLoop"), ("no_loop", "noLoop"),
+    ("loop", "loop"),
+    ("frameRate", "frameRate"), ("frame_rate", "frameRate"),
+    ("fill", "fill"),
+    ("noFill", "noFill"), ("no_fill", "noFill"),
+    ("stroke", "stroke"),
+    ("noStroke", "noStroke"), ("no_stroke", "noStroke"),
+    ("strokeWeight", "strokeWeight"), ("stroke_weight", "strokeWeight"),
+    ("colorMode", "colorMode"), ("color_mode", "colorMode"),
+    ("color", "color"),
+    ("circle", "circle"),
+    ("ellipse", "ellipse"),
+    ("rect", "rect"),
+    ("square", "square"),
+    ("line", "line"),
+    ("point", "point"),
+    ("triangle", "triangle"),
+    ("quad", "quad"),
+    ("arc", "arc"),
+    ("beginShape", "beginShape"), ("begin_shape", "beginShape"),
+    ("endShape", "endShape"), ("end_shape", "endShape"),
+    ("vertex", "vertex"),
+    ("curveVertex", "curveVertex"), ("curve_vertex", "curveVertex"),
+    ("bezierVertex", "bezierVertex"), ("bezier_vertex", "bezierVertex"),
+    ("text", "text"),
+    ("textSize", "textSize"), ("text_size", "textSize"),
+    ("textAlign", "textAlign"), ("text_align", "textAlign"),
+    ("textFont", "textFont"), ("text_font", "textFont"),
+    ("translate", "translate"),
+    ("rotate", "rotate"),
+    ("scale", "scale"),
+    ("push", "push"),
+    ("pop", "pop"),
+    ("constrain", "constrain"),
+    ("dist", "dist"),
+    ("lerp", "lerp"),
+    ("norm", "norm"),
+    ("sq", "sq"),
+    ("sqrt", "sqrt"),
+    ("remap", "map"),
+    ("random", "random"),
+    ("noise", "noise"),
+]
+
+class _P5Module(types.ModuleType):
+    def __getattr__(self, name):
+        sketch = getattr(_js, "_p5Sketch", None)
+        if sketch is None:
+            raise AttributeError(name)
+        return getattr(sketch, name)
+
+_p5_module = _P5Module('p5')
+_p5_all = []
+for _py_name, _js_name in _PYDE_P5_FUNCS:
+    setattr(_p5_module, _py_name, _pyde_p5_method(_js_name))
+    _p5_all.append(_py_name)
+_p5_module.__all__ = _p5_all
+sys.modules['p5'] = _p5_module
+`;
+
+/* Share payloads are either a plain code string (the original format - kept
+   so old links never break) or, when a program input file needs to travel
+   with it, a JSON object {code, vfileName, vfileContent}. Real Python source
+   never happens to also be valid JSON matching that shape, so trying JSON
+   first and falling back to "it's just the code" is unambiguous. */
+function _pyde_decodeSharePayload(decoded) {
+  try {
+    const obj = JSON.parse(decoded);
+    if (obj && typeof obj.code === 'string') return obj;
+  } catch (e) { /* not JSON - plain code from the older format */ }
+  return { code: decoded };
+}
+
+/* ---------- CodeMirror setup ---------- */
+let editorInitialValue = null;
+let autoOpenPuzzle = false;
+let pendingPuzzleCode = null;
+let pendingVfile = null;
+if (location.hash.startsWith('#code=')) {
+  try {
+    const decoded = LZString.decompressFromEncodedURIComponent(location.hash.slice(6));
+    if (decoded) {
+      const parsed = _pyde_decodeSharePayload(decoded);
+      editorInitialValue = parsed.code;
+      if (parsed.vfileContent !== undefined) pendingVfile = { name: parsed.vfileName, content: parsed.vfileContent };
+    }
+  } catch (e) { /* ignore malformed hash */ }
+} else if (location.hash.startsWith('#puzzle=')) {
+  try {
+    const decoded = LZString.decompressFromEncodedURIComponent(location.hash.slice(8));
+    if (decoded) {
+      const parsed = _pyde_decodeSharePayload(decoded);
+      // Deliberately NOT put in the editor - closing the puzzle before
+      // solving it must not reveal the answer. It only ever lives in
+      // pendingPuzzleCode / parsonsOriginal until solved correctly.
+      pendingPuzzleCode = parsed.code;
+      autoOpenPuzzle = true;
+      editorInitialValue = '# Solve the puzzle to reveal the code!\n# (click "Parsons" above if it does not open automatically)';
+      if (parsed.vfileContent !== undefined) pendingVfile = { name: parsed.vfileName, content: parsed.vfileContent };
+    }
+  } catch (e) { /* ignore malformed hash */ }
+}
+
+/* No share link - fall back to whatever was last saved locally, so a crash
+   or an accidental reload doesn't lose someone's work (see draft auto-save
+   further down, once the editor exists). */
+if (editorInitialValue === null) {
+  try {
+    const draft = localStorage.getItem('pyde-draft');
+    if (draft) editorInitialValue = draft;
+  } catch (e) { /* ignore */ }
+}
+
+/* Cmd-D / Ctrl-D: select word under cursor, then add each further match as an
+   extra selection (like VS Code / Sublime "select next occurrence"). */
+function selectNextOccurrence(cm) {
+  const selections = cm.listSelections();
+  const last = selections[selections.length - 1];
+
+  if (CodeMirror.cmpPos(last.anchor, last.head) === 0) {
+    const cur = last.head;
+    const line = cm.getLine(cur.line);
+    let start = cur.ch, end = cur.ch;
+    while (start > 0 && /\w/.test(line.charAt(start - 1))) start--;
+    while (end < line.length && /\w/.test(line.charAt(end))) end++;
+    if (start === end) return;
+    const from = { line: cur.line, ch: start };
+    const to = { line: cur.line, ch: end };
+    const newSelections = selections.slice(0, -1).concat([{ anchor: from, head: to }]);
+    cm.setSelections(newSelections, newSelections.length - 1);
+    return;
+  }
+
+  const word = cm.getRange(last.anchor, last.head);
+  if (!word) return;
+  const searchFrom = CodeMirror.cmpPos(last.anchor, last.head) < 0 ? last.head : last.anchor;
+
+  const isDuplicate = (from, to) => selections.some(s =>
+    (CodeMirror.cmpPos(s.anchor, from) === 0 && CodeMirror.cmpPos(s.head, to) === 0) ||
+    (CodeMirror.cmpPos(s.anchor, to) === 0 && CodeMirror.cmpPos(s.head, from) === 0)
+  );
+
+  let cursor = cm.getSearchCursor(word, searchFrom);
+  let from = null, to = null;
+  for (let i = 0; i < selections.length + 1; i++) {
+    if (!cursor.findNext()) {
+      cursor = cm.getSearchCursor(word, { line: 0, ch: 0 });
+      if (!cursor.findNext()) return;
+    }
+    from = cursor.from();
+    to = cursor.to();
+    if (!isDuplicate(from, to)) break;
+  }
+  if (!from) return;
+
+  const newSelections = selections.concat([{ anchor: from, head: to }]);
+  cm.setSelections(newSelections, newSelections.length - 1);
+  cm.scrollIntoView({ from, to });
+}
+
+/* Tab: indent the selected lines when something is selected, otherwise just
+   insert a soft tab at the cursor. */
+function smartTab(cm) {
+  if (cm.somethingSelected()) {
+    cm.execCommand('indentMore');
+  } else {
+    cm.replaceSelection('    ');
+  }
+}
+
+/* '#' with a selection: toggle a "# " comment prefix on every selected line,
+   instead of replacing the selection with a literal '#'. */
+function toggleLineComment(cm) {
+  if (!cm.somethingSelected()) return CodeMirror.Pass;
+  const lineSet = new Set();
+  cm.listSelections().forEach(sel => {
+    const fromLine = Math.min(sel.anchor.line, sel.head.line);
+    const toLine = Math.max(sel.anchor.line, sel.head.line);
+    for (let l = fromLine; l <= toLine; l++) lineSet.add(l);
+  });
+  const lines = [...lineSet].sort((a, b) => a - b);
+  const codeLines = lines.filter(l => cm.getLine(l).trim() !== '');
+  const shouldUncomment = codeLines.length > 0 && codeLines.every(l => /^\s*#/.test(cm.getLine(l)));
+
+  cm.operation(() => {
+    lines.forEach(l => {
+      const text = cm.getLine(l);
+      if (text.trim() === '') return;
+      if (shouldUncomment) {
+        const m = text.match(/^(\s*)#\s?/);
+        if (m) cm.replaceRange('', { line: l, ch: m[1].length }, { line: l, ch: m[0].length });
+      } else {
+        const indent = text.match(/^\s*/)[0].length;
+        cm.replaceRange('# ', { line: l, ch: indent }, { line: l, ch: indent });
       }
     });
+  });
+}
 
-    document.getElementById('theme-toggle').addEventListener('click', function () {
-      const root = document.documentElement;
-      const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-      root.setAttribute('data-theme', next);
-      try { localStorage.setItem('pyde-theme', next); } catch (e) {}
-      editor.setOption('theme', 'sketch');
-      document.getElementById('theme-toggle').textContent = next === 'dark' ? '☀ Light' : '🌙 Dark';
+/* Backspace at the start of an indented line (only whitespace before the
+   cursor) deletes back to the previous indent stop, not just one space. */
+function smartBackspace(cm) {
+  if (cm.somethingSelected()) return CodeMirror.Pass;
+  const cur = cm.getCursor();
+  const beforeCursor = cm.getLine(cur.line).slice(0, cur.ch);
+  if (!/^\s+$/.test(beforeCursor)) return CodeMirror.Pass;
+  const tabSize = cm.getOption('indentUnit') || 4;
+  const deleteCount = cur.ch % tabSize === 0 ? tabSize : cur.ch % tabSize;
+  cm.replaceRange('', { line: cur.line, ch: cur.ch - deleteCount }, cur);
+}
+
+const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+
+/* CodeMirror normally switches to a touch/virtual-keyboard-friendly
+   "contenteditable" input mode on mobile, based on sniffing the user agent
+   for phrases like "iPad". Since iPadOS 13, Safari sends a desktop-style user
+   agent by default, so that detection misses real iPads and CodeMirror falls
+   back to its plain hidden-textarea mode, which behaves worse with the
+   on-screen keyboard. Detect touch capability directly instead. */
+const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+
+const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
+  mode: 'python',
+  theme: 'sketch',
+  lineNumbers: true,
+  matchBrackets: true,
+  autoCloseBrackets: true,
+  inputStyle: isTouchDevice ? 'contenteditable' : 'textarea',
+  indentUnit: 4,
+  tabSize: 4,
+  extraKeys: {
+    Tab: smartTab,
+    'Shift-Tab': 'indentLess',
+    Backspace: smartBackspace,
+    "'#'": toggleLineComment,
+    'Cmd-D': selectNextOccurrence,
+    'Ctrl-D': selectNextOccurrence
+  }
+});
+if (editorInitialValue !== null) editor.setValue(editorInitialValue);
+if (pendingVfile) {
+  document.getElementById('vfile-name').value = pendingVfile.name || 'input.txt';
+  document.getElementById('vfile-content').value = pendingVfile.content || '';
+  document.querySelector('details.vfile').open = true;
+} else {
+  // No share link carrying an input file - fall back to whatever was last
+  // typed there, same safety net as the code draft below.
+  try {
+    const savedVfile = JSON.parse(localStorage.getItem('pyde-vfile') || 'null');
+    if (savedVfile && (savedVfile.name || savedVfile.content)) {
+      document.getElementById('vfile-name').value = savedVfile.name || 'input.txt';
+      document.getElementById('vfile-content').value = savedVfile.content || '';
+    }
+  } catch (e) { /* ignore */ }
+}
+
+/* ---------- Copy with syntax colour (for pasting into Word/OneNote etc) ---------- */
+/* Word and OneNote render whatever's in the clipboard's text/html entry, so
+   alongside the normal plain-text copy, this also writes an HTML version
+   with each token coloured to match. The colours are read live from the
+   real CodeMirror CSS for the *current* theme (via a throwaway offscreen
+   element) rather than a hand-maintained map, so this can't drift out of
+   sync with the active CodeMirror theme or a theme switch. */
+const _tokenColorCache = {};
+function _pyde_tokenColor(themeClass, type) {
+  const key = themeClass + '|' + (type || '');
+  if (key in _tokenColorCache) return _tokenColorCache[key];
+  const probe = document.createElement('div');
+  probe.className = 'CodeMirror ' + themeClass;
+  probe.style.cssText = 'position:absolute; left:-9999px; top:-9999px;';
+  const span = document.createElement('span');
+  if (type) span.className = type.split(' ').map(t => 'cm-' + t).join(' ');
+  span.textContent = 'x';
+  probe.appendChild(span);
+  document.body.appendChild(probe);
+  const color = getComputedStyle(span).color;
+  document.body.removeChild(probe);
+  _tokenColorCache[key] = color;
+  return color;
+}
+function _pyde_escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function _pyde_highlightedHtml(cm, from, to) {
+  const themeClass = 'cm-s-' + cm.getOption('theme');
+  let html = '';
+  for (let line = from.line; line <= to.line; line++) {
+    const tokens = cm.getLineTokens(line);
+    const startCh = line === from.line ? from.ch : 0;
+    const endCh = line === to.line ? to.ch : cm.getLine(line).length;
+    const lineText = cm.getLine(line);
+    tokens.forEach(tok => {
+      const s = Math.max(tok.start, startCh);
+      const e = Math.min(tok.end, endCh);
+      if (s >= e) return;
+      const color = _pyde_tokenColor(themeClass, tok.type);
+      html += '<span style="color:' + color + '">' + _pyde_escapeHtml(lineText.slice(s, e)) + '</span>';
     });
-  </script>
+    if (line !== to.line) html += '\n';
+  }
+  return html;
+}
+editor.getWrapperElement().addEventListener('copy', (e) => {
+  if (!editor.somethingSelected() || !e.clipboardData) return;
+  const ranges = editor.listSelections()
+    .map(sel => CodeMirror.cmpPos(sel.anchor, sel.head) <= 0 ? { from: sel.anchor, to: sel.head } : { from: sel.head, to: sel.anchor })
+    .sort((a, b) => CodeMirror.cmpPos(a.from, b.from));
+  const html = ranges.map(r => _pyde_highlightedHtml(editor, r.from, r.to)).join('\n');
+  e.clipboardData.setData('text/plain', editor.getSelection());
+  e.clipboardData.setData('text/html', '<pre style="font-family:\'JetBrains Mono\',Consolas,monospace; white-space:pre; margin:0;">' + html + '</pre>');
+  e.preventDefault();
+});
+
+/* ---------- Draft auto-save ---------- */
+/* Registered after the initial setValue above, so loading a share/puzzle
+   link's content (or the placeholder shown before a puzzle is solved) never
+   itself counts as a save - only actual edits from here do. */
+let draftSaveTimer = null;
+editor.on('change', () => {
+  // A share/puzzle link's #hash describes a snapshot from when it was
+  // created. The moment the code changes, that snapshot is stale - keeping
+  // it in the address bar means a later page refresh would silently discard
+  // the newer edits and reload the old shared version instead. Drop it, so
+  // a refresh falls through to the draft below (the actual latest content).
+  if (location.hash) {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+  }
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(() => {
+    try { localStorage.setItem('pyde-draft', editor.getValue()); } catch (e) { /* ignore */ }
+  }, 500);
+});
+
+/* ---------- Input file auto-save ---------- */
+let vfileSaveTimer = null;
+function scheduleVfileSave() {
+  clearTimeout(vfileSaveTimer);
+  vfileSaveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem('pyde-vfile', JSON.stringify({
+        name: document.getElementById('vfile-name').value,
+        content: document.getElementById('vfile-content').value
+      }));
+    } catch (e) { /* ignore */ }
+  }, 500);
+}
+document.getElementById('vfile-name').addEventListener('input', scheduleVfileSave);
+document.getElementById('vfile-content').addEventListener('input', scheduleVfileSave);
+
+/* ---------- Font size ---------- */
+let editorFontSize = 14;
+try {
+  const savedFontSize = parseInt(localStorage.getItem('pyde-font-size') || '', 10);
+  if (!isNaN(savedFontSize)) editorFontSize = savedFontSize;
+} catch (e) { /* ignore */ }
+
+function applyFontSize(size) {
+  editorFontSize = Math.max(10, Math.min(28, size));
+  document.documentElement.style.setProperty('--editor-font-size', editorFontSize + 'px');
+  try { localStorage.setItem('pyde-font-size', String(editorFontSize)); } catch (e) { /* ignore */ }
+  editor.refresh();
+}
+applyFontSize(editorFontSize);
+document.getElementById('font-smaller').addEventListener('click', () => applyFontSize(editorFontSize - 2));
+document.getElementById('font-larger').addEventListener('click', () => applyFontSize(editorFontSize + 2));
+
+/* ---------- Resizable editor/output split ---------- */
+(function () {
+  const splitter = document.getElementById('panel-splitter');
+  const editorPanel = document.getElementById('editor-panel');
+  const workspace = document.querySelector('main.workspace');
+  let dragging = false;
+
+  function applyWidth(px) {
+    const min = 200;
+    const max = workspace.clientWidth - 200 - splitter.offsetWidth;
+    if (max <= min) return;
+    editorPanel.style.flex = '0 0 ' + Math.max(min, Math.min(max, px)) + 'px';
+    editor.refresh();
+  }
+
+  try {
+    const savedWidth = parseInt(localStorage.getItem('pyde-editor-width') || '', 10);
+    if (!isNaN(savedWidth)) applyWidth(savedWidth);
+  } catch (e) { /* ignore */ }
+
+  splitter.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    splitter.classList.add('dragging');
+    splitter.setPointerCapture(e.pointerId);
+  });
+  splitter.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    applyWidth(e.clientX - workspace.getBoundingClientRect().left);
+  });
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    splitter.classList.remove('dragging');
+    try {
+      localStorage.setItem('pyde-editor-width', String(Math.round(editorPanel.getBoundingClientRect().width)));
+    } catch (e) { /* ignore */ }
+  }
+  splitter.addEventListener('pointerup', endDrag);
+  splitter.addEventListener('pointercancel', endDrag);
+})();
+
+/* ---------- Theme toggle ---------- */
+function applyTheme(mode) {
+  document.documentElement.setAttribute('data-theme', mode);
+  try { localStorage.setItem('pyde-theme', mode); } catch (e) { /* ignore */ }
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.innerHTML = mode === 'dark' ? '&#9728;&#65039; Light' : '&#127769; Dark';
+  editor.setOption('theme', 'sketch');
+}
+applyTheme(currentTheme);
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+});
+
+function updateCharCount() {
+  const len = editor.getValue().length;
+  const el = document.getElementById('char-count');
+  el.textContent = len + ' chars';
+  el.classList.toggle('warn', len > 1500);
+  el.title = len > 1500 ? 'Long programs may produce a very long / unreliable share URL' : '';
+}
+editor.on('change', updateCharCount);
+updateCharCount();
+
+/* ---------- Toast ---------- */
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+/* ---------- Tabs ---------- */
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('hidden', c.id !== 'tab-' + name));
+}
+document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+
+/* ---------- Console ---------- */
+function clearConsole() {
+  document.getElementById('console-output').innerHTML = '';
+}
+function appendConsole(msg, cls) {
+  const pre = document.getElementById('console-output');
+  const span = document.createElement('span');
+  span.className = cls;
+  span.textContent = msg + '\n';
+  pre.appendChild(span);
+  pre.scrollTop = pre.scrollHeight;
+}
+
+/* input() bridge: override Python's builtin input() to show a real browser
+   prompt() dialog with the exact prompt text, rather than relying on
+   Pyodide's line-buffered stdin (which doesn't flush an unterminated
+   prompt string in time to be useful). */
+window._ideInputBridge = function (promptText) {
+  const value = window.prompt(promptText);
+  const result = value === null ? '' : value;
+  appendConsole(promptText + result, 'stdout');
+  return result;
+};
+const INPUT_OVERRIDE_SRC = `
+import builtins
+import js as _js
+
+def _ide_input(prompt=''):
+    return _js._ideInputBridge(str(prompt))
+
+builtins.input = _ide_input
+`;
+
+/* Non-blocking input(): rewrites input() calls into `yield` points and runs
+   the script as a generator, so JS can drive it and show an inline text box
+   in the console at each pause instead of a popup.
+
+   input() calls at plain top-level code (inside loops/conditionals is fine,
+   they don't introduce a scope) are the easy case. But calling input() from
+   inside a helper function is very common (and good practice), so a "tainted"
+   top-level function — one that calls input() directly, or calls another
+   tainted top-level function — is also converted into a generator, and every
+   *call site* of a tainted function is rewritten into `yield from` so the
+   pause propagates back out to the top.
+
+   This only rewrites plain `name(...)` calls to functions defined directly
+   at module level. The moment anything is ambiguous enough that a blind
+   name-based rewrite could be wrong — a tainted function called through an
+   alias or attribute, passed around as a value, decorated, recursive, or
+   whose name is shadowed by a parameter/loop variable/nested def anywhere in
+   the file — the whole thing bails out to the window.prompt() fallback
+   rather than risk silently miscompiling the program. Likewise input() (or a
+   reference to a tainted function) found inside a lambda, comprehension,
+   class body, or nested (non-top-level) function forces a bail-out, since
+   none of those are rewritten. Used only for plain (non-turtle, non-p5)
+   programs — see runCode(). */
+const INPUT_GENERATOR_SRC = `
+import ast
+
+
+class _PydeUnsafe(Exception):
+    pass
+
+
+def _pyde_call_name(node):
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        return node.func.id
+    return None
+
+
+class _PydeScanner(ast.NodeVisitor):
+    def __init__(self, top_level_funcs):
+        self.top_level_funcs = top_level_funcs
+        self.direct_input = set()
+        self.call_edges = {}
+        self.bound_names = set()
+        self.referenced_bare = set()
+        self.scope_stack = ['<module>']
+
+    def _edges(self):
+        return self.call_edges.setdefault(self.scope_stack[-1], set())
+
+    def _bind(self, name):
+        if isinstance(name, str):
+            self.bound_names.add(name)
+
+    def _bind_target(self, target):
+        for node in ast.walk(target):
+            if isinstance(node, ast.Name):
+                self._bind(node.id)
+
+    def visit_FunctionDef(self, node):
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node):
+        self._visit_function(node)
+
+    def _visit_function(self, node):
+        is_top_level = (
+            self.scope_stack[-1] == '<module>' and node.name in self.top_level_funcs
+        )
+        if not is_top_level:
+            self._bind(node.name)
+        for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+            self._bind(arg.arg)
+        if node.args.vararg:
+            self._bind(node.args.vararg.arg)
+        if node.args.kwarg:
+            self._bind(node.args.kwarg.arg)
+
+        if node.decorator_list:
+            for dec in node.decorator_list:
+                self.visit(dec)
+            if is_top_level:
+                self.referenced_bare.add(node.name)
+
+        if is_top_level:
+            self.scope_stack.append(node.name)
+            for stmt in node.body:
+                self.visit(stmt)
+            self.scope_stack.pop()
+        else:
+            self._scan_forbidden_scope(node)
+
+    def visit_Lambda(self, node):
+        self._scan_forbidden_scope(node)
+
+    def visit_ClassDef(self, node):
+        self._bind(node.name)
+        self._scan_forbidden_scope(node)
+
+    def visit_ListComp(self, node):
+        self._scan_forbidden_scope(node)
+
+    visit_SetComp = visit_ListComp
+    visit_DictComp = visit_ListComp
+    visit_GeneratorExp = visit_ListComp
+
+    def _scan_forbidden_scope(self, node):
+        for child in ast.walk(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self._bind(child.name)
+            elif isinstance(child, ast.arg):
+                self._bind(child.arg)
+            elif isinstance(child, ast.Call) and _pyde_call_name(child) == 'input':
+                raise _PydeUnsafe('input() used somewhere too complex to safely rewrite')
+            elif isinstance(child, ast.Name) and child.id in self.top_level_funcs:
+                raise _PydeUnsafe('a function is referenced somewhere too complex to safely rewrite')
+
+    def visit_Assign(self, node):
+        for target in node.targets:
+            self._bind_target(target)
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node):
+        self._bind_target(node.target)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node):
+        self._bind_target(node.target)
+        self.generic_visit(node)
+
+    def visit_For(self, node):
+        self._bind_target(node.target)
+        self.generic_visit(node)
+
+    def visit_With(self, node):
+        for item in node.items:
+            if item.optional_vars:
+                self._bind_target(item.optional_vars)
+        self.generic_visit(node)
+
+    def visit_ExceptHandler(self, node):
+        self._bind(node.name)
+        self.generic_visit(node)
+
+    def visit_Global(self, node):
+        for name in node.names:
+            self._bind(name)
+        self.generic_visit(node)
+
+    def visit_Nonlocal(self, node):
+        for name in node.names:
+            self._bind(name)
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        name = _pyde_call_name(node)
+        if name == 'input':
+            self.direct_input.add(self.scope_stack[-1])
+        elif name is not None and name in self.top_level_funcs:
+            self._edges().add(name)
+        else:
+            self.visit(node.func)
+        for arg in node.args:
+            self.visit(arg)
+        for kw in node.keywords:
+            self.visit(kw.value)
+
+    def visit_Name(self, node):
+        if node.id in self.top_level_funcs and not isinstance(node.ctx, ast.Store):
+            self.referenced_bare.add(node.id)
+
+
+class _PydeRewriter(ast.NodeTransformer):
+    def __init__(self, tainted):
+        self.tainted = tainted
+
+    def visit_Call(self, node):
+        self.generic_visit(node)
+        name = _pyde_call_name(node)
+        if name == 'input':
+            prompt_arg = node.args[0] if node.args else ast.Constant(value='')
+            return ast.copy_location(ast.Yield(value=prompt_arg), node)
+        if name in self.tainted:
+            return ast.copy_location(ast.YieldFrom(value=node), node)
+        return node
+
+
+def _pyde_find_cycle(tainted, call_edges):
+    visiting, visited = set(), set()
+
+    def dfs(name):
+        if name in visited:
+            return False
+        if name in visiting:
+            return True
+        visiting.add(name)
+        for nxt in call_edges.get(name, ()):
+            if nxt in tainted and dfs(nxt):
+                return True
+        visiting.discard(name)
+        visited.add(name)
+        return False
+
+    return any(dfs(name) for name in tainted)
+
+
+def _pyde_make_input_generator(source):
+    try:
+        tree = ast.parse(source, mode='exec')
+    except SyntaxError:
+        return None
+
+    top_level_funcs = {
+        node.name: node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    scanner = _PydeScanner(top_level_funcs)
+    try:
+        scanner.visit(tree)
+    except _PydeUnsafe:
+        return None
+
+    tainted = set(scanner.direct_input) & set(top_level_funcs)
+    changed = True
+    while changed:
+        changed = False
+        for name in top_level_funcs:
+            if name in tainted:
+                continue
+            if scanner.call_edges.get(name, set()) & tainted:
+                tainted.add(name)
+                changed = True
+
+    if tainted & scanner.referenced_bare:
+        return None
+    if tainted & scanner.bound_names:
+        return None
+    if _pyde_find_cycle(tainted, scanner.call_edges):
+        return None
+
+    new_tree = _PydeRewriter(tainted).visit(tree)
+    body = new_tree.body if new_tree.body else [ast.Pass()]
+    func_def = ast.FunctionDef(
+        name='__pyde_main',
+        args=ast.arguments(
+            posonlyargs=[], args=[], vararg=None,
+            kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]
+        ),
+        body=body,
+        decorator_list=[],
+        returns=None,
+    )
+    wrapper = ast.Module(body=[func_def], type_ignores=[])
+    ast.fix_missing_locations(wrapper)
+    ns = {}
+    exec(compile(wrapper, '<exec>', 'exec'), ns)
+    return ns['__pyde_main']()
+`;
+
+/* Shows an inline, in-console text box for one input() request and resolves
+   with what the student typed once they press Enter. Unlike window.prompt(),
+   this keeps the whole console scrollback visible the whole time. */
+function requestInlineInput(promptText) {
+  return new Promise((resolve) => {
+    const pre = document.getElementById('console-output');
+    const line = document.createElement('span');
+    line.className = 'console-input-line';
+    const promptSpan = document.createElement('span');
+    promptSpan.className = 'stdout';
+    promptSpan.textContent = promptText;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'console-inline-input';
+    input.autocomplete = 'off';
+    input.autocapitalize = 'off';
+    input.spellcheck = false;
+    line.appendChild(promptSpan);
+    line.appendChild(input);
+    pre.appendChild(line);
+    pre.scrollTop = pre.scrollHeight;
+    input.focus();
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const value = input.value;
+        line.remove();
+        appendConsole(promptText + value, 'stdout');
+        resolve(value);
+      }
+    });
+  });
+}
+
+/* Attempts the non-blocking inline-input path for a plain (non-graphics)
+   program. Returns false (without side effects) if the code has no input()
+   calls, or if the AST transform couldn't safely rewrite them (input() used
+   inside a nested function) — the caller then falls back to running the
+   code normally, where input() still works via the window.prompt() bridge. */
+async function tryRunWithInlineInput(code) {
+  if (!/\binput\s*\(/.test(code)) return false;
+  let gen;
+  try {
+    gen = pyodide.globals.get('_pyde_make_input_generator')(code);
+  } catch (e) {
+    return false;
+  }
+  if (!gen) return false;
+  let sendValue;
+  while (true) {
+    const result = gen.next(sendValue);
+    if (result.done) break;
+    sendValue = await requestInlineInput(String(result.value));
+  }
+  return true;
+}
+
+/* ---------- Pyodide setup ---------- */
+let pyodide = null;
+let pyodideReady = false;
+let isRunning = false;
+const runBtn = document.getElementById('run-btn');
+
+async function initPyodide() {
+  pyodide = await loadPyodide();
+  pyodide.setStdout({ batched: (msg) => appendConsole(msg, 'stdout') });
+  pyodide.setStderr({ batched: (msg) => appendConsole(msg, 'stderr') });
+  pyodide.setStdin({ stdin: () => (window.prompt('Input:') || '') + '\n' });
+  await pyodide.runPythonAsync(P5_MODULE_SRC);
+  await pyodide.runPythonAsync(INPUT_OVERRIDE_SRC);
+  await pyodide.runPythonAsync(INPUT_GENERATOR_SRC);
+  pyodideReady = true;
+  document.getElementById('status-dot').classList.add('ready');
+  document.getElementById('status-text').textContent = 'Ready';
+  runBtn.disabled = false;
+  document.getElementById('tidy-btn').disabled = false;
+}
+initPyodide().catch(err => {
+  document.getElementById('status-text').textContent = 'Failed to load Python runtime';
+  appendConsole(String(err), 'stderr');
+});
+
+/* ---------- Turtle mode ---------- */
+async function resetTurtleShim(ctx, canvas) {
+  window._turtleCanvas = canvas;
+  window._turtleCtx = ctx;
+  await pyodide.runPythonAsync(
+    "import sys, types\n" +
+    "_ns = {}\n" +
+    "exec(_TURTLE_SRC_TEXT, _ns)\n" +
+    "_mod = types.ModuleType('turtle')\n" +
+    "_mod.__dict__.update(_ns)\n" +
+    "sys.modules['turtle'] = _mod\n"
+  );
+}
+
+/* ---------- p5 mode ---------- */
+let currentP5Instance = null;
+let p5LoadPromise = null;
+function loadP5Library() {
+  if (window.p5) return Promise.resolve();
+  if (p5LoadPromise) return p5LoadPromise;
+  p5LoadPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js';
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+  return p5LoadPromise;
+}
+function createP5Instance(container) {
+  const hasSetup = pyodide.globals.get('setup');
+  const hasDraw = pyodide.globals.get('draw');
+  const sketchFn = (sketch) => {
+    window._p5Sketch = sketch;
+    sketch.setup = () => {
+      sketch.createCanvas(400, 400);
+      if (hasSetup) {
+        try { hasSetup(); } catch (e) { appendConsole(String(e.message || e), 'stderr'); }
+      }
+    };
+    if (hasDraw) {
+      sketch.draw = () => {
+        try { hasDraw(); } catch (e) { appendConsole(String(e.message || e), 'stderr'); sketch.noLoop(); }
+      };
+    }
+  };
+  currentP5Instance = new p5(sketchFn, container);
+}
+
+/* ---------- Virtual input file ---------- */
+function writeVirtualFile() {
+  const filename = document.getElementById('vfile-name').value.trim() || 'input.txt';
+  const content = document.getElementById('vfile-content').value;
+  try { pyodide.FS.writeFile(filename, content); } catch (e) { /* ignore */ }
+}
+
+/* ---------- Captured output files ---------- */
+function snapshotFS() {
+  const snap = {};
+  try {
+    const entries = pyodide.FS.readdir('.');
+    for (const name of entries) {
+      if (name === '.' || name === '..') continue;
+      try {
+        const stat = pyodide.FS.stat(name);
+        if (pyodide.FS.isFile(stat.mode)) {
+          snap[name] = stat.mtime instanceof Date ? stat.mtime.getTime() : String(stat.mtime);
+        }
+      } catch (e) { /* ignore */ }
+    }
+  } catch (e) { /* ignore */ }
+  return snap;
+}
+function diffAndListFiles(before) {
+  const after = snapshotFS();
+  const changed = [];
+  for (const name in after) {
+    if (!(name in before) || before[name] !== after[name]) changed.push(name);
+  }
+  const list = document.getElementById('files-list');
+  const empty = document.getElementById('files-empty');
+  list.innerHTML = '';
+  if (changed.length === 0) {
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  changed.forEach(name => {
+    let data;
+    try { data = pyodide.FS.readFile(name); } catch (e) { return; }
+    const blob = new Blob([data]);
+    const url = URL.createObjectURL(blob);
+
+    const li = document.createElement('li');
+    li.className = 'file-entry';
+
+    const header = document.createElement('div');
+    header.className = 'file-entry-header';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'file-entry-name';
+    nameSpan.textContent = name;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.textContent = '⬇ Download';
+    header.appendChild(nameSpan);
+    header.appendChild(a);
+    li.appendChild(header);
+
+    // Show text files inline (handy on iPad, where downloading a blob is
+    // clunky) - falls back to a download-only note for anything not valid
+    // UTF-8 text.
+    let text = null;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(data); } catch (e) { /* binary */ }
+    if (text !== null) {
+      const preview = document.createElement('textarea');
+      preview.className = 'file-entry-preview';
+      preview.readOnly = true;
+      preview.spellcheck = false;
+      preview.value = text;
+      li.appendChild(preview);
+    } else {
+      const note = document.createElement('p');
+      note.className = 'file-entry-binary-note';
+      note.textContent = 'Binary file - download to view.';
+      li.appendChild(note);
+    }
+
+    list.appendChild(li);
+  });
+}
+
+/* ---------- Tidy (autopep8) ---------- */
+let autopep8Module = null;
+async function ensureAutopep8() {
+  if (autopep8Module) return autopep8Module;
+  await pyodide.loadPackage('micropip');
+  const micropip = pyodide.pyimport('micropip');
+  await micropip.install('autopep8');
+  autopep8Module = pyodide.pyimport('autopep8');
+  return autopep8Module;
+}
+
+async function tidyCode() {
+  if (!pyodideReady) return;
+  const tidyBtn = document.getElementById('tidy-btn');
+  tidyBtn.disabled = true;
+  const originalLabel = tidyBtn.innerHTML;
+  tidyBtn.innerHTML = '&#129529; Tidying&hellip;';
+  try {
+    const autopep8 = await ensureAutopep8();
+    const before = editor.getValue();
+    const after = autopep8.fix_code(before);
+    if (after === before) {
+      showToast('Already tidy!');
+    } else {
+      const cursor = editor.getCursor();
+      editor.setValue(after);
+      editor.setCursor(cursor);
+      showToast('Code tidied with autopep8.');
+    }
+  } catch (err) {
+    showToast('Tidy failed: ' + (err.message || err));
+  } finally {
+    tidyBtn.disabled = false;
+    tidyBtn.innerHTML = originalLabel;
+  }
+}
+document.getElementById('tidy-btn').addEventListener('click', tidyCode);
+
+/* ---------- Run ---------- */
+async function runCode() {
+  if (!pyodideReady || isRunning) return;
+  isRunning = true;
+  runBtn.disabled = true;
+  clearConsole();
+
+  const code = editor.getValue();
+  const isTurtle = /\bimport\s+turtle\b|\bfrom\s+turtle\s+import\b/.test(code);
+  const isP5 = !isTurtle && (/\bimport\s+p5\b|\bfrom\s+p5\s+import\b/.test(code) || /def\s+draw\s*\(\s*\)\s*:/.test(code));
+
+  const turtleCanvas = document.getElementById('turtle-canvas');
+  const p5Container = document.getElementById('p5-container');
+
+  try {
+    if (isTurtle) {
+      switchTab('graphics');
+      turtleCanvas.style.display = 'block';
+      p5Container.style.display = 'none';
+      const ctx = turtleCanvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, turtleCanvas.width, turtleCanvas.height);
+      pyodide.globals.set('_TURTLE_SRC_TEXT', TURTLE_SRC);
+      await resetTurtleShim(ctx, turtleCanvas);
+    } else if (isP5) {
+      switchTab('graphics');
+      turtleCanvas.style.display = 'none';
+      p5Container.style.display = 'block';
+      p5Container.innerHTML = '';
+      if (currentP5Instance) { currentP5Instance.remove(); currentP5Instance = null; }
+      await loadP5Library();
+    } else {
+      switchTab('console');
+    }
+
+    writeVirtualFile();
+    const before = snapshotFS();
+
+    try {
+      let handledInline = false;
+      if (!isTurtle && !isP5) {
+        handledInline = await tryRunWithInlineInput(code);
+      }
+      if (!handledInline) {
+        await pyodide.runPythonAsync(code);
+        if (isP5) createP5Instance(p5Container);
+      }
+    } catch (err) {
+      appendConsole(String(err.message || err), 'stderr');
+      switchTab('console');
+    }
+
+    diffAndListFiles(before);
+  } finally {
+    isRunning = false;
+    runBtn.disabled = false;
+  }
+}
+runBtn.addEventListener('click', runCode);
+
+/* ---------- Download / Upload ---------- */
+function downloadCode() {
+  let filename = document.getElementById('filename-input').value.trim() || 'program.py';
+  if (!filename.toLowerCase().endsWith('.py')) filename += '.py';
+  const blob = new Blob([editor.getValue()], { type: 'text/x-python' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+document.getElementById('download-btn').addEventListener('click', downloadCode);
+
+document.getElementById('upload-btn').addEventListener('click', () => document.getElementById('upload-input').click());
+document.getElementById('upload-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    editor.setValue(reader.result);
+    document.getElementById('filename-input').value = file.name;
+    updateCharCount();
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+/* ---------- New ---------- */
+/* A clearly-labelled way to start a genuinely blank program, distinct from
+   "select all, delete" - the latter reads as normal practice to a pupil
+   watching, when what we actually want is a deliberate, obvious action that
+   doesn't look like how you'd tidy up code you meant to keep. */
+document.getElementById('new-btn').addEventListener('click', () => {
+  if (!confirm('Start a new, blank program? This replaces the current code and input file.')) return;
+  if (currentP5Instance) { currentP5Instance.remove(); currentP5Instance = null; }
+  editor.setValue('');
+  document.getElementById('filename-input').value = 'program.py';
+  document.getElementById('vfile-name').value = 'input.txt';
+  document.getElementById('vfile-content').value = '';
+  document.getElementById('turtle-canvas').style.display = 'none';
+  document.getElementById('p5-container').style.display = 'none';
+  document.getElementById('p5-container').innerHTML = '';
+  clearConsole();
+  document.getElementById('files-list').innerHTML = '';
+  document.getElementById('files-empty').classList.remove('hidden');
+  switchTab('console');
+  try {
+    localStorage.removeItem('pyde-draft');
+    localStorage.removeItem('pyde-vfile');
+  } catch (e) { /* ignore */ }
+  if (location.hash) {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+  }
+  showToast('Started a new blank program.');
+});
+
+/* ---------- Share ---------- */
+/* Bundles the program input file into the link too, when one's filled in,
+   so a shared example that reads a file actually works for whoever opens
+   it - not just a plain code string any more. */
+function _pyde_buildSharePayload(code) {
+  const vfileContent = document.getElementById('vfile-content').value;
+  if (!vfileContent) return code;
+  const vfileName = document.getElementById('vfile-name').value.trim() || 'input.txt';
+  return JSON.stringify({ code, vfileName, vfileContent });
+}
+
+document.getElementById('share-btn').addEventListener('click', () => {
+  const code = editor.getValue();
+  const compressed = LZString.compressToEncodedURIComponent(_pyde_buildSharePayload(code));
+  const url = location.origin + location.pathname + '#code=' + compressed;
+  history.replaceState(null, '', '#code=' + compressed);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url)
+      .then(() => showToast('Share link copied to clipboard!'))
+      .catch(() => showToast('URL updated in address bar'));
+  } else {
+    showToast('URL updated in address bar');
+  }
+});
+
+/* ---------- Parsons puzzle ---------- */
+let parsonsOriginal = [];
+let dragEl = null;
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  if (arr.length > 1 && arr.join('\n') === parsonsOriginal.join('\n')) {
+    [arr[0], arr[1]] = [arr[1], arr[0]];
+  }
+  return arr;
+}
+
+function makeBlock(text) {
+  const div = document.createElement('div');
+  div.className = 'parsons-block';
+  div.draggable = true;
+  div.textContent = text;
+  div.dataset.text = text;
+  div.addEventListener('dragstart', () => {
+    dragEl = div;
+    div.classList.add('dragging');
+  });
+  div.addEventListener('dragend', () => {
+    div.classList.remove('dragging');
+    dragEl = null;
+  });
+  return div;
+}
+
+function renderParsonsBlocks(shuffled) {
+  const tray = document.getElementById('parsons-tray');
+  const dz = document.getElementById('parsons-dropzone');
+  tray.innerHTML = '';
+  dz.innerHTML = '';
+  shuffled.forEach(line => tray.appendChild(makeBlock(line)));
+  document.getElementById('parsons-result').textContent = '';
+  document.getElementById('parsons-result').classList.remove('success');
+}
+
+function getDragAfterElement(container, y) {
+  const els = [...container.querySelectorAll('.parsons-block:not(.dragging)')];
+  return els.reduce((closest, child) => {
+    const box = child.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > closest.offset) return { offset, element: child };
+    return closest;
+  }, { offset: -Infinity, element: null }).element;
+}
+
+[document.getElementById('parsons-tray'), document.getElementById('parsons-dropzone')].forEach(zone => {
+  zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (!dragEl) return;
+    const afterEl = getDragAfterElement(zone, e.clientY);
+    if (afterEl == null) zone.appendChild(dragEl);
+    else zone.insertBefore(dragEl, afterEl);
+  });
+});
+
+function openParsons(sourceOverride) {
+  const code = sourceOverride !== undefined && sourceOverride !== null ? sourceOverride : editor.getValue();
+  const lines = code.split('\n').filter(l => l.trim() !== '' && !l.trim().startsWith('#'));
+  if (lines.length < 2) {
+    showToast('Need at least 2 lines of code for a puzzle.');
+    return;
+  }
+  parsonsOriginal = lines;
+  renderParsonsBlocks(shuffle(lines.slice()));
+  document.getElementById('parsons-overlay').classList.remove('hidden');
+}
+document.getElementById('parsons-btn').addEventListener('click', () => openParsons(pendingPuzzleCode));
+document.getElementById('parsons-close').addEventListener('click', () => {
+  document.getElementById('parsons-overlay').classList.add('hidden');
+});
+document.getElementById('parsons-reset').addEventListener('click', () => {
+  renderParsonsBlocks(shuffle(parsonsOriginal.slice()));
+});
+document.getElementById('parsons-check').addEventListener('click', () => {
+  const dz = document.getElementById('parsons-dropzone');
+  const blocks = [...dz.children];
+  let correctCount = 0;
+  blocks.forEach((block, i) => {
+    block.classList.remove('correct', 'incorrect');
+    if (parsonsOriginal[i] === block.dataset.text) {
+      block.classList.add('correct');
+      correctCount++;
+    } else {
+      block.classList.add('incorrect');
+    }
+  });
+  const result = document.getElementById('parsons-result');
+  result.classList.remove('success');
+  if (blocks.length !== parsonsOriginal.length) {
+    result.textContent = blocks.length + '/' + parsonsOriginal.length + ' lines placed, ' + correctCount + ' in the correct position.';
+  } else if (correctCount === parsonsOriginal.length) {
+    result.textContent = 'All lines are in the correct order!';
+    result.classList.add('success');
+    // Solved fairly - now safe to reveal in the editor (matters most for a
+    // shared puzzle link, where the editor never held the real code before this).
+    editor.setValue(parsonsOriginal.join('\n'));
+  } else {
+    result.textContent = correctCount + '/' + parsonsOriginal.length + ' lines in the correct position.';
+  }
+});
+
+document.getElementById('parsons-copy').addEventListener('click', () => {
+  const dz = document.getElementById('parsons-dropzone');
+  const text = [...dz.children].map(b => b.dataset.text).join('\n');
+  if (!text) {
+    showToast('Nothing to copy yet - drag some lines in first.');
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(() => showToast('Copied to clipboard!'))
+      .catch(() => showToast('Copy failed - select and copy manually.'));
+  } else {
+    showToast('Clipboard not available.');
+  }
+});
+
+document.getElementById('parsons-share').addEventListener('click', () => {
+  const compressed = LZString.compressToEncodedURIComponent(_pyde_buildSharePayload(parsonsOriginal.join('\n')));
+  const url = location.origin + location.pathname + '#puzzle=' + compressed;
+  history.replaceState(null, '', '#puzzle=' + compressed);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url)
+      .then(() => showToast('Puzzle link copied to clipboard!'))
+      .catch(() => showToast('URL updated in address bar'));
+  } else {
+    showToast('URL updated in address bar');
+  }
+});
+
+if (autoOpenPuzzle) openParsons(pendingPuzzleCode);
+
+/* ---------- About / disclaimer ---------- */
+document.getElementById('about-btn').addEventListener('click', () => {
+  document.getElementById('about-overlay').classList.remove('hidden');
+});
+document.getElementById('about-close').addEventListener('click', () => {
+  document.getElementById('about-overlay').classList.add('hidden');
+});
+
+let seenDisclaimer = true;
+try { seenDisclaimer = localStorage.getItem('pyde-seen-disclaimer') === '1'; } catch (e) { /* ignore */ }
+if (!seenDisclaimer && !autoOpenPuzzle) {
+  document.getElementById('about-overlay').classList.remove('hidden');
+  try { localStorage.setItem('pyde-seen-disclaimer', '1'); } catch (e) { /* ignore */ }
+}
+</script>
 </body>
 </html>
