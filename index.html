@@ -2348,8 +2348,11 @@ function loadP5Library() {
     s.integrity = 'sha512-d6sc8kbZEtA2LwB9m/ck0FhvyUwVfdmvTeyJRprmj7Wg9wRFtHDIpr6qk4g/y3Ix3O9I6KHIv6SGu9f7RaP1Gw==';
     s.crossOrigin = 'anonymous';
     s.referrerPolicy = 'no-referrer';
-    s.onload = resolve;
-    s.onerror = reject;
+    s.onload = () => resolve();
+    s.onerror = (err) => {
+      p5LoadPromise = null;
+      reject(err);
+    };
     document.head.appendChild(s);
   });
   return p5LoadPromise;
@@ -2413,9 +2416,12 @@ function bindPythonP5Hooks() {
 /* ---------- Virtual input file ---------- */
 function writeVirtualFile() {
   const filenameInput = document.getElementById('vfile-name');
+  const rawFilename = filenameInput.value;
   const filename = normaliseVirtualFilename(filenameInput.value);
   if (filenameInput.value !== filename) filenameInput.value = filename;
   const content = document.getElementById('vfile-content').value;
+  const shouldWrite = content !== '' || (rawFilename.trim() !== '' && filename !== 'input.txt');
+  if (!shouldWrite) return null;
   try { pyodide.FS.writeFile(filename, content); } catch (e) { /* ignore */ }
   return filename;
 }
@@ -2527,13 +2533,22 @@ function diffAndListFiles(before) {
 
 /* ---------- Tidy (autopep8) ---------- */
 let autopep8Module = null;
+let autopep8Promise = null;
 async function ensureAutopep8() {
   if (autopep8Module) return autopep8Module;
-  await pyodide.loadPackage('micropip');
-  const micropip = pyodide.pyimport('micropip');
-  await micropip.install('autopep8');
-  autopep8Module = pyodide.pyimport('autopep8');
-  return autopep8Module;
+  if (!autopep8Promise) {
+    autopep8Promise = (async () => {
+      await pyodide.loadPackage('micropip');
+      const micropip = pyodide.pyimport('micropip');
+      await micropip.install('autopep8');
+      autopep8Module = pyodide.pyimport('autopep8');
+      return autopep8Module;
+    })().catch((err) => {
+      autopep8Promise = null;
+      throw err;
+    });
+  }
+  return autopep8Promise;
 }
 
 async function tidyCode() {
