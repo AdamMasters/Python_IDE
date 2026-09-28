@@ -2357,6 +2357,7 @@ function writeVirtualFile() {
   if (filenameInput.value !== filename) filenameInput.value = filename;
   const content = document.getElementById('vfile-content').value;
   try { pyodide.FS.writeFile(filename, content); } catch (e) { /* ignore */ }
+  return filename;
 }
 
 /* ---------- Captured output files ---------- */
@@ -2538,8 +2539,12 @@ async function runCode() {
       switchTab('console');
     }
 
-    writeVirtualFile();
     const before = snapshotFS();
+    const injectedVirtualFilename = writeVirtualFile();
+    const afterInject = snapshotFS();
+    if (injectedVirtualFilename && Object.prototype.hasOwnProperty.call(afterInject, injectedVirtualFilename)) {
+      before[injectedVirtualFilename] = afterInject[injectedVirtualFilename];
+    }
 
     try {
       if (isP5) {
